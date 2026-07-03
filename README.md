@@ -2,7 +2,7 @@
 
 Plants generate tiny electrical signals in response to things like touch, light, water stress, and mechanical disturbance. This project is an attempt to actually pick up on that — measuring a plant's bio-potential alongside its surrounding environment (light, temperature, humidity, soil moisture), and pushing all of it to a live dashboard you can check from your phone.
 
-The core idea: plants "talk" electrically all the time, we just don't usually have the equipment to listen. This system is that equipment, built on an ESP32.
+The core idea: plants talk electrically all the time, we just don't usually have the equipment to listen. This system is that equipment, built on an ESP32.
 
 ## What it actually does
 
@@ -38,7 +38,7 @@ The core idea: plants "talk" electrically all the time, we just don't usually ha
 | AD620 S+ / S− | Electrode 1 / Electrode 2 | |
 | AD620 VIN | 3.3V | |
 
-Everything runs off a shared 3.3V rail with common ground — kept it all on one voltage domain to avoid I2C headaches (learned that one the hard way).
+Everything runs off a shared 3.3V rail with common ground — kept it all on one voltage domain to avoid I2C headaches.
 
 ## How it's put together
 
