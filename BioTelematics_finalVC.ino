@@ -243,12 +243,3 @@ void loop() {
   Blynk.run();
   timer.run();
 }
-
-BLYNK_WRITE(V9) {
-  int pumpState = param.asInt();
-  if (pumpState == 1) {
-    Serial.println("[Pump Control] ON requested (demo only - no relay wired)");
-  } else {
-    Serial.println("[Pump Control] OFF requested (demo only - no relay wired)");
-  }
-}
