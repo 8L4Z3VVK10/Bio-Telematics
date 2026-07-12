@@ -1,7 +1,7 @@
 #define BLYNK_PRINT Serial
-#define BLYNK_TEMPLATE_ID "TMPL3XZZeHrEf"
+#define BLYNK_TEMPLATE_ID "TMPxxxxxxxxxxx"
 #define BLYNK_TEMPLATE_NAME "Bio-Telematics"
-#define BLYNK_AUTH_TOKEN "lYidSJg_1WRFcatYJ-vnDLpQgsmnV31A"
+#define BLYNK_AUTH_TOKEN "Your_Auth_Token"
 
 #include <WiFi.h>
 #include <BlynkSimpleEsp32.h>
@@ -11,8 +11,8 @@
 #include <DHT.h>
 #include <time.h>
 
-char ssid[] = "Azkaban3";
-char pass[] = "Snape123";
+char ssid[] = "YOUR_WIFI_NAME";
+char pass[] = "WIFI_PASSWORD";
 
 const char* ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = 19800;
@@ -36,14 +36,21 @@ const float TEMP_LOW = 15.0,  TEMP_HIGH = 35.0;
 const float HUM_LOW  = 30.0,  HUM_HIGH  = 80.0;
 const int   SOIL_LOW = 30,    SOIL_HIGH = 70;
 
+const long SEND_INTERVAL_MS = 5000;
+
 float bioBaseline = 0;
 bool baselineSet = false;
-const int BASELINE_SAMPLES = 10;
+const int BASELINE_SAMPLES = 12;
 int baselineCount = 0;
 float baselineSum = 0;
 
-const float MILD_STRESS_THRESHOLD   = 0.008;
-const float SEVERE_STRESS_THRESHOLD = 0.020;
+const float MILD_STRESS_THRESHOLD   = 0.015;
+const float SEVERE_STRESS_THRESHOLD = 0.035;
+
+float filteredBioVolts = 0;
+bool filterInitialized = false;
+const float FILTER_ALPHA = 0.20;
+const float BASELINE_ALPHA = 0.002;
 
 int scoreInRange(float value, float low, float high) {
   if (value >= low && value <= high) return 100;
@@ -87,6 +94,14 @@ void sendSensorData() {
   int16_t bioRaw = ads.readADC_SingleEnded(0);
   float bioVolts = ads.computeVolts(bioRaw);
 
+  if (!filterInitialized) {
+    filteredBioVolts = bioVolts;
+    filterInitialized = true;
+  } else {
+    filteredBioVolts = (1.0 - FILTER_ALPHA) * filteredBioVolts + FILTER_ALPHA * bioVolts;
+  }
+  bioVolts = filteredBioVolts;
+
   float temp = dht.readTemperature();
   float hum = dht.readHumidity();
   bool dhtOk = !isnan(temp) && !isnan(hum);
@@ -108,8 +123,10 @@ void sendSensorData() {
     return;
   }
 
+  bioBaseline = (1.0 - BASELINE_ALPHA) * bioBaseline + BASELINE_ALPHA * bioVolts;
   float deviation = abs(bioVolts - bioBaseline);
-  String bioStatus;
+
+  const char* bioStatus;
   if (deviation >= SEVERE_STRESS_THRESHOLD) {
     bioStatus = "SEVERE STRESS";
   } else if (deviation >= MILD_STRESS_THRESHOLD) {
@@ -125,8 +142,8 @@ void sendSensorData() {
   int lightScore = lightHealthScore(lux, daytime);
   int overallScore = (tempScore + humScore + soilScore + lightScore) / 4;
 
-  String healthStatus;
-  String recommendation;
+  const char* healthStatus;
+  const char* recommendation;
   int lowestScore = min(min(tempScore, humScore), min(soilScore, lightScore));
   int lowestCriticalScore = lowestScore;
 
@@ -146,35 +163,37 @@ void sendSensorData() {
     healthStatus = "Critical";
   }
 
-  if (healthStatus == "Excellent") {
+  if (strcmp(healthStatus, "Excellent") == 0) {
     recommendation = "Conditions are optimal. No action needed.";
-  } else if (healthStatus == "Healthy") {
+  } else if (strcmp(healthStatus, "Healthy") == 0) {
     recommendation = "Conditions are good. Keep monitoring.";
   } else {
-    if (lowestScore == soilScore) recommendation = "Soil moisture is out of range — consider watering or checking drainage.";
-    else if (lowestScore == lightScore) recommendation = "Light levels are out of range — consider repositioning the plant.";
+    if (lowestScore == soilScore) recommendation = "Soil moisture is out of range - consider watering or checking drainage.";
+    else if (lowestScore == lightScore) recommendation = "Light levels are out of range - consider repositioning the plant.";
     else if (lowestScore == tempScore) recommendation = "Temperature is out of the healthy range for this plant.";
     else recommendation = "Humidity is out of the healthy range.";
   }
 
-  if (bioStatus == "SEVERE STRESS") {
+  if (strcmp(bioStatus, "SEVERE STRESS") == 0) {
     recommendation = "Strong bio-electrical stress response detected. Inspect plant for physical damage or acute stress immediately.";
   }
 
   static bool severeAlertSent = false;
   static bool criticalAlertSent = false;
 
-  if (bioStatus == "SEVERE STRESS" && !severeAlertSent) {
+  if (strcmp(bioStatus, "SEVERE STRESS") == 0 && !severeAlertSent) {
     Blynk.logEvent("severe_stress", "Severe bio-electrical stress detected on plant!");
     severeAlertSent = true;
-  } else if (bioStatus != "SEVERE STRESS") {
+  } else if (strcmp(bioStatus, "SEVERE STRESS") != 0) {
     severeAlertSent = false;
   }
 
-  if (healthStatus == "Critical" && !criticalAlertSent) {
-    Blynk.logEvent("critical_health", "Plant health score is critical: " + String(overallScore) + "/100");
+  if (strcmp(healthStatus, "Critical") == 0 && !criticalAlertSent) {
+    char eventMsg[64];
+    snprintf(eventMsg, sizeof(eventMsg), "Plant health score is critical: %d/100", overallScore);
+    Blynk.logEvent("critical_health", eventMsg);
     criticalAlertSent = true;
-  } else if (healthStatus != "Critical") {
+  } else if (strcmp(healthStatus, "Critical") != 0) {
     criticalAlertSent = false;
   }
 
@@ -189,17 +208,19 @@ void sendSensorData() {
   Serial.print("Recommendation: "); Serial.println(recommendation);
   Serial.println("========================================\n");
 
-  if (dhtOk) {
-    Blynk.virtualWrite(V0, temp);
-    Blynk.virtualWrite(V1, hum);
+  if (WiFi.status() == WL_CONNECTED) {
+    if (dhtOk) {
+      Blynk.virtualWrite(V0, temp);
+      Blynk.virtualWrite(V1, hum);
+    }
+    Blynk.virtualWrite(V2, lux);
+    Blynk.virtualWrite(V3, soilPercent);
+    Blynk.virtualWrite(V4, bioVolts);
+    Blynk.virtualWrite(V5, overallScore);
+    Blynk.virtualWrite(V6, healthStatus);
+    Blynk.virtualWrite(V7, recommendation);
+    Blynk.virtualWrite(V8, bioStatus);
   }
-  Blynk.virtualWrite(V2, lux);
-  Blynk.virtualWrite(V3, soilPercent);
-  Blynk.virtualWrite(V4, bioVolts);
-  Blynk.virtualWrite(V5, overallScore);
-  Blynk.virtualWrite(V6, healthStatus);
-  Blynk.virtualWrite(V7, recommendation);
-  Blynk.virtualWrite(V8, bioStatus);
 }
 
 void setup() {
@@ -224,7 +245,23 @@ void setup() {
   dht.begin();
   Serial.println("DHT22: initialized");
 
-  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+  WiFi.begin(ssid, pass);
+  Serial.print("Connecting WiFi");
+
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi Connected");
+    Blynk.config(BLYNK_AUTH_TOKEN);
+    Blynk.connect();
+  } else {
+    Serial.println("\nWiFi Failed - continuing offline");
+  }
 
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   struct tm timeinfo;
@@ -234,12 +271,15 @@ void setup() {
     Serial.println("Time sync failed - will retry automatically, defaulting to daytime assumption until then");
   }
 
-  timer.setInterval(2000L, sendSensorData);
+  timer.setInterval(SEND_INTERVAL_MS, sendSensorData);
 
-  Serial.println("Settling bio-potential baseline, please don't touch the plant...");
+  Serial.println("Settling bio-potential baseline for about 1 minute, please don't touch the plant...");
 }
 
 void loop() {
-  Blynk.run();
+  if (WiFi.status() == WL_CONNECTED) {
+    Blynk.run();
+  }
   timer.run();
+  delay(10);
 }
