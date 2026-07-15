@@ -50,7 +50,13 @@ const float SEVERE_STRESS_THRESHOLD = 0.035;
 float filteredBioVolts = 0;
 bool filterInitialized = false;
 const float FILTER_ALPHA = 0.20;
-const float BASELINE_ALPHA = 0.002;
+const float BASELINE_ALPHA = 0.002;          
+const float BASELINE_ALPHA_FAST = 0.05;     
+const unsigned long SETTLING_TIME_MS = 30000; 
+
+unsigned long systemStartTime;
+bool isSettling = true;
+unsigned long baselineSetTime = 0;
 
 int scoreInRange(float value, float low, float high) {
   if (value >= low && value <= high) return 100;
@@ -118,12 +124,25 @@ void sendSensorData() {
     if (baselineCount >= BASELINE_SAMPLES) {
       bioBaseline = baselineSum / BASELINE_SAMPLES;
       baselineSet = true;
+      baselineSetTime = millis();   
       Serial.print("Baseline set: "); Serial.println(bioBaseline, 4);
     }
     return;
   }
 
-  bioBaseline = (1.0 - BASELINE_ALPHA) * bioBaseline + BASELINE_ALPHA * bioVolts;
+  float activeBaselineAlpha;
+  if (isSettling) {
+    if (millis() - baselineSetTime < SETTLING_TIME_MS) {
+      activeBaselineAlpha = BASELINE_ALPHA_FAST;
+    } else {
+      isSettling = false;
+      activeBaselineAlpha = BASELINE_ALPHA;
+    }
+  } else {
+    activeBaselineAlpha = BASELINE_ALPHA;
+  }
+  bioBaseline = (1.0 - activeBaselineAlpha) * bioBaseline + activeBaselineAlpha * bioVolts;
+
   float deviation = abs(bioVolts - bioBaseline);
 
   const char* bioStatus;
@@ -274,6 +293,7 @@ void setup() {
   timer.setInterval(SEND_INTERVAL_MS, sendSensorData);
 
   Serial.println("Settling bio-potential baseline for about 1 minute, please don't touch the plant...");
+  systemStartTime = millis();
 }
 
 void loop() {
